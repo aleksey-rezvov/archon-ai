@@ -29,6 +29,7 @@ dependencies = [
     "deprecated==1.2.15",
     "deprecation==2.1.0",
     "distro==1.9.0",
+    "docling>=2.15.1",
     "eval-type-backport==0.2.2",
     "executing==2.1.0",
     "fake-http-header==0.3.5",
