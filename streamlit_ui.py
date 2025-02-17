@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, AsyncGenerator
 from langgraph.types import Command
 from openai import AsyncOpenAI
 from supabase import Client
@@ -9,6 +9,7 @@ import asyncio
 import json
 import uuid
 import os
+import logging
 
 # Import all the message part classes
 from pydantic_ai.messages import (
@@ -36,8 +37,18 @@ supabase: Client = Client(
     os.getenv("SUPABASE_SERVICE_KEY")
 )
 
-# Configure logfire to suppress warnings (optional)
+# Configure logfire to suppress warnings
 logfire.configure(send_to_logfire='never')
+
+# Configure standard Python logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 @st.cache_resource
 def get_thread_id():
@@ -45,30 +56,41 @@ def get_thread_id():
 
 thread_id = get_thread_id()
 
-async def run_agent_with_streaming(user_input: str):
+def truncate_text(text: str, max_length: int = 100) -> str:
+    """Truncate text and add ellipsis if it exceeds max_length"""
+    return text[:max_length] + "..." if len(text) > max_length else text
+
+async def run_agent_with_streaming(user_input: str) -> AsyncGenerator[str, None]:
     """
     Run the agent with streaming text for the user_input prompt,
     while maintaining the entire conversation in `st.session_state.messages`.
     """
+    logger.info(f"Starting agent execution with input: {truncate_text(user_input)}")
+    
     config = {
         "configurable": {
             "thread_id": thread_id
         }
     }
 
-    # First message from user
-    if len(st.session_state.messages) == 1:
-        async for msg in agentic_flow.astream(
-                {"latest_user_message": user_input}, config, stream_mode="custom"
+    try:
+        # First message from user
+        if len(st.session_state.messages) == 1:
+            async for msg in agentic_flow.astream(
+                    {"latest_user_message": user_input}, config, stream_mode="custom"
+                ):
+                    logger.info(f"Streaming chunk: {truncate_text(msg, 50)}")
+                    yield msg
+        # Continue the conversation
+        else:
+            async for msg in agentic_flow.astream(
+                Command(resume=user_input), config, stream_mode="custom"
             ):
+                logger.info(f"Streaming chunk: {truncate_text(msg, 50)}")
                 yield msg
-    # Continue the conversation
-    else:
-        async for msg in agentic_flow.astream(
-            Command(resume=user_input), config, stream_mode="custom"
-        ):
-            yield msg
-
+    except Exception as e:
+        logger.error(f"Error in agent execution: {e}")
+        raise
 
 async def main():
     st.title("Archon - Agent Builder")
@@ -90,6 +112,7 @@ async def main():
     user_input = st.chat_input("What do you want to build today?")
 
     if user_input:
+        logger.info(f"New user message received: {truncate_text(user_input)}")
         # We append a new request to the conversation explicitly
         st.session_state.messages.append({"type": "human", "content": user_input})
         
@@ -100,13 +123,13 @@ async def main():
         # Display assistant response in chat message container
         response_content = ""
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()  # Placeholder for updating the message
-            # Run the async generator to fetch responses
+            message_placeholder = st.empty()
             async for chunk in run_agent_with_streaming(user_input):
                 response_content += chunk
-                # Update the placeholder with the current response content
                 message_placeholder.markdown(response_content)
+                logger.info(f"Updated response content: {truncate_text(response_content)}")
         
+        logger.info(f"Final response completed: {truncate_text(response_content)}")
         st.session_state.messages.append({"type": "ai", "content": response_content})
 
 
