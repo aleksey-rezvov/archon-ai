@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from supabase import Client
 import logfire
+import logging
 import os
 
 # Import the message classes from Pydantic AI
@@ -18,6 +19,7 @@ from pydantic_ai.messages import (
 )
 
 from pydantic_ai_coder import pydantic_ai_coder, PydanticAIDeps, list_documentation_pages_helper
+from utils import truncate_str
 
 # Load environment variables
 load_dotenv()
@@ -112,14 +114,30 @@ async def coder_agent(state: AgentState, writer):
         result = await pydantic_ai_coder.run(state['latest_user_message'], deps=deps, message_history= message_history)
         writer(result.data)
     else:
+        prompt = state['latest_user_message']
+        logging.info(f"Running stream with prompt: {truncate_str(prompt)}")  
+
         async with pydantic_ai_coder.run_stream(
-            state['latest_user_message'],
+            prompt,
             deps=deps,
-            message_history= message_history
+            message_history=message_history
         ) as result:
-            # Stream partial text as it arrives
-            async for chunk in result.stream_text(delta=True):
-                writer(chunk)
+            logging.info(f"Result object: {truncate_str(result)}")
+            
+            logging.info("Starting stream processing...")
+            try:
+                stream = result.stream_text(delta=True)
+
+                async for chunk in stream:
+                    if chunk:
+                        logging.info(f"Chunk: {chunk}")
+                        writer(chunk)
+                    else:
+                        logging.info("Empty chunk received")
+                            
+            except Exception as e:
+                logging.error(f"Error in streaming: {e}")
+                logging.exception("Full traceback:")
 
     # print(ModelMessagesTypeAdapter.validate_json(result.new_messages_json()))
 
@@ -127,6 +145,7 @@ async def coder_agent(state: AgentState, writer):
 
 # Interrupt the graph to get the user's next message
 def get_next_user_message(state: AgentState):
+    # logging.info(f"get_next_user_message.state: {state}")
     value = interrupt({})
 
     # Set the user's latest message for the LLM to continue the conversation
@@ -198,4 +217,6 @@ builder.add_edge("finish_conversation", END)
 
 # Configure persistence
 memory = MemorySaver()
-agentic_flow = builder.compile(checkpointer=memory)
+agentic_flow = builder.compile(
+    checkpointer=memory, 
+)

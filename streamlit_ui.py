@@ -69,7 +69,8 @@ async def run_agent_with_streaming(user_input: str) -> AsyncGenerator[str, None]
     
     config = {
         "configurable": {
-            "thread_id": thread_id
+            "thread_id": thread_id,
+            "debug": True  # Enable debug mode
         }
     }
 
@@ -134,4 +135,13 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Set logging level to DEBUG to see more detailed logs
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler()
+        ]
+    )
+    logger = logging.getLogger(__name__)
     asyncio.run(main())
